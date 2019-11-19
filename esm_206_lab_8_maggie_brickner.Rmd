@@ -1,0 +1,243 @@
+---
+title: "Lab 8 Anova, chi-square, beeswarm and a cool table"
+author: "Margaret Brickner"
+date: "11/19/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(car)
+library(janitor)
+library(ggbeeswarm)
+library(kableExtra)
+```
+
+### 1. Read in the data (penguins.csv)
+
+```{r}
+penguins <- read.csv("penguins.csv") %>% 
+  janitor::clean_names()
+```
+
+### 2. Find counts of penguin by sex and species
+
+If we have information in case format (each observation has its own row) we can use count. It is most user friendly in case format. You can use it in count format just have to add a weight
+```{r}
+penguin_counts <- penguins %>% 
+  count(species, sex)
+
+#all three sample sizes for female penguins (what we're looking at) make me think that they're going to be evenly distributed thanks to the CLT. All greater than 30. 
+
+```
+
+### 3. Compare flipper sizes for female penguins across the 3 species. 
+
+Think you're going to be doing a single factor anova on flipper length based on species. Species is the single factor. 
+
+```{r}
+penguin_f <- penguins %>% 
+  filter(sex == "FEMALE")
+
+# Always look at your data before you can do anything else. We want to make sure that ANOVA (which compares means) is a good way to compare. 
+
+#Facetd histograms
+
+ggplot(data = penguin_f, aes(x = flipper_length_mm)) +
+  geom_histogram() +
+  facet_wrap(~species)
+
+# I have a large enough sample size and they are also normally distributed
+
+# Faceted QQ plot
+ggplot(data = penguin_f, aes(sample = flipper_length_mm)) +
+  geom_qq() +
+  facet_wrap(~species)
+
+
+```
+
+### 4. Find summary statistics 
+
+When you're using an ANOVA you're assuming that the variance is the same
+
+```{r}
+# count is a combination of group by and n
+penguin_f_summary <- penguin_f %>% 
+  group_by(species) %>% 
+  summarize(
+    mean_flipper_length = mean(flipper_length_mm), 
+    sd_flipper_length = sd(flipper_length_mm), 
+    sample_size = n(), 
+    sese_flipper_length = sd(flipper_length_mm) / sqrt(n()),
+    var_flipper_length = var(flipper_length_mm)
+  )
+```
+
+Levene's Test (hypothesis is test for equal variances)
+
+```{r}
+#H0 : Group variances are equal
+
+leveneTest(flipper_length_mm ~ species, data = penguin_f)
+
+# Do not have sufficient evidence to debunk its close though (0.057)
+
+```
+
+Conclusion: Retain the null hypothesis that variances are equal. 
+
+OK, I've done my exploratory analysis, and ALL of these peices combines are making me think that a one-way ANOVA is an appropriate wat to compare means between the 3 species
+
+### 5. Make a beeswarm plot with the mean and standard deviation overlayed on top of it. 
+
+The three most common error bars: 
+-standard deviation - a measure of spread
+-standard error - indication of how far we think our data is from population * the most commonly shown
+-confidence error - if we did this a number of times 95% would fall within the population
+
+```{r}
+# To create this plot we're pulling from two data frames. Beeswarm from the penguin_f and summary info from the summar df. geom point requires two numeric values for x and y. beeswarm can take one categorical. If you were using continuous then you would identify the breaks and then you could do scale_x_descrete and make sure you give it the same number of breaks. Make sure your order is the same across df!!!! For the error bars we want them to start at the mean and go up one standar dev and on the bottom the mean minus one std. 
+
+ggplot() + 
+  geom_beeswarm(data = penguin_f, aes (x = species, y = flipper_length_mm), 
+                size = 1, 
+                alpha = 0.6, 
+                color = "gray60") + 
+  scale_x_discrete(labels = c("Adelie", "Chinstrap", "Gentoo")) + 
+  geom_point(data = penguin_f_summary, 
+             aes(x = species, y = mean_flipper_length), 
+             color = "red", 
+             size = 2) + 
+  geom_errorbar(data = penguin_f_summary, 
+                aes(x = species, 
+                    ymin = mean_flipper_length - sd_flipper_length, 
+                    ymax = mean_flipper_length + sd_flipper_length), 
+                color = "red", 
+                width = 0.1) + 
+  theme_bw()
+
+
+```
+**Note** Make sure that if you're showing summary statistics, you actually say what you're showing
+
+**Figure 1.** Flipper length (mm) for females of three penguin species (Adelie, Chinstrap, Gentoo) observed at Plamer Station LTER, Antartica. Gray points indicate individual flipper lengths, red dots indicate group means, error bars indicate $\pm$ 1 standard deviation. Data source: even if you say in the references
+
+If you plan on using medians later for analysis, then you would choose to visually show medians on the above graph. 
+
+### 6. One-way ANOVA
+
+Is there a significant difference in mean flipper length for female penguins between the three species (Adelie, Chinstrap, Gentoo)? 
+```{r}
+
+# Even though we split it up already give the aov the full information
+
+penguin_aov <- aov(flipper_length_mm ~ species, data = penguin_f)
+summary(penguin_aov)
+
+# Large F value shows that there is a very large between group variance compared to the within group variance. The P value tells me that this spread is so large that it is really really really unlikely that these were drawn from popuations with the same mean (or the same population). If there were overalpping samples the F value would get smaller while the P value would be larger. 
+```
+
+H~0~: The means are equal across all groups
+H~A~: The means are not equal across all groups (at least two differ or all of them)
+
+The mean flipper legnths for the three species (for female penguins) are not equal. (you would stop here if the null was upheld)
+
+...then which ones differ significantly?
+
+Post-hoc pairwise comparisons. We're using Tukeys (responsibe and conservative) but we're encouraged to use others. 
+
+```{r}
+TukeyHSD(penguin_aov)
+```
+
+H~0~: There is no sig. difference between the means in this pairwise comparison
+H~A~: There is  sig. difference between the means in this pairwise comparison
+
+What we're most intersted in is the p-wise adjusted. They are all significantly different at a 5% significance level. 
+
+One-way ANOVA with post-hoc Tukey's HSD reveals significant difference in mean flipper lenght across all species (Gentoo, mean = , Chinstrap, mean = , Adelie, mean = ) (F(df)= ...., p <0.001 for all pairwise comparisons). 
+
+This is suprising looking at the beeswarm plot because sd overlap! Might be because we chose to show sd instead of standard error. Also indicates that even if you have a large enough sample size you will always get a significant difference even if things are really really close together. 
+
+### 7. Making nicer tables (with proportions)
+
+**NOTE** vastly oversimplifying. 
+
+```{r}
+# normally you wouldn't pipe just into count if you were doing more data exploration. We're not so there ya go
+
+party_relig <- gss_cat %>% 
+  filter(partyid %in% c("Strong republican", "Strong democrat")) %>% 
+  filter(relig %in% c("None", "Catholic")) %>% 
+  count(partyid, relig) 
+
+# This long format can be hard to read. So we're going to turn it into a square. 
+
+party_relig_table <- party_relig %>% 
+  pivot_wider(names_from = relig, values_from = n)
+
+```
+
+### 8. Make a nice table of proportions using the janitor::adorn_*
+
+```{r}
+
+# percentages which direction you what to calculate percentages based on. 
+
+party_relig_props <- party_relig_table %>% 
+  janitor::adorn_percentages(denominator = "row") %>% 
+  adorn_pct_formatting(digits = 1) %>% 
+  adorn_ns(position = "front")
+
+# this doesn't look nice enough to include in a report so we're going to use kableExtra
+
+kable(party_relig_props) %>%
+  kable_styling()
+
+# this looks like there are some strong correlations. What we have just made is a two by two contingency table (the numbers on either side can be anything). Is the likely hood of cats and dogs getting heartworn the same? Exampe on the board. There are going to be some real world confoundingness. We can say that the likely hood of the probability for dogs and cats getting heartworm is the same (62%, 38%, 57%, 43%). Do i think that there is a significant effect of species on the probability of getting heartworm. You can ask the question for chi-sqare in a bunch of diferent ways and they all mean the same thing
+```
+**Ways to Talk about Chi-square** a good option if you have to categorical values with counts in them. 
+
+- Are political and religious affiliation independent from each other? (closest techinally but least useful)
+
+- Is there a significant association between political affiliation and religious affiliation? 
+
+- Is there a significant effect of political association (strong republican vs. strong democrat) on religious affiliation (non, Catholic)? Be careful with wording so that we're not implying a causal direction)
+
+- Is there a significant difference in religious affiliation between strong republicans and strong democrats?
+
+All chi-sqare needs is the four values not either of the outside lables for columns or rows. 
+
+```{r}
+# make this a contingency tabe that only contains the actual counts (sure we only have a contingency (only the counts)
+
+chi_counts <- party_relig_table %>% 
+  select(-partyid)
+
+# you can use select to remove too!
+
+
+```
+
+H~0~: 
+- There is no significant association between arty affiliation and relgious affiliation
+- There is not sig. diff. in religious affiliation between the two party groups (strng rep, strg dem)
+- Party and religious affiliation are indepent (most technically sound)
+
+H~A~: 
+
+```{r}
+my_party_chi <- chisq.test(chi_counts)
+my_party_chi
+
+```
+
+Chi-square uses a differnt type of distribution. This uses the chi-sqare distribution. df= number of row-1 x number cols-1. pvalue is still similar
+
+There is a significant difference in relgious affiliation (None, Catholic) between strong republicans and strong democrats. ($\chi^2$ = ...., p < 0.001)
+
+or...
+- There is a significant association between party ID and religious affiliation
+- Party affiliation and religious affiliation are independent ??? did she says these backwards
